@@ -24,20 +24,26 @@ import org.opencv.core.Mat;
 
 @TeleOp
 public class TwoWheelCameraDrive extends LinearOpMode {
-    private DcMotor leftFront = null;
-    private DcMotor rightFront = null;
+    private DcMotor leftFrontMotor = null;
+    private DcMotor rightFrontMotor = null;
+    private Servo cameraLRServo = null;
+    private Servo cameraUDServo = null;
     private VisionPortal visionPortal;
     private AprilTagProcessor aprilTag;
+    private double cameraLRPos = 0.5;
+    private double cameraUDPos = 0.5;
 
     @Override
     public void runOpMode() {
         telemetry.addData("Status", "Initialized");
         telemetry.update();
 
-        leftFront  = hardwareMap.get(DcMotor.class, "motor 2");
-        rightFront = hardwareMap.get(DcMotor.class, "motor 1");
-        leftFront.setDirection(DcMotor.Direction.FORWARD);
-        rightFront.setDirection(DcMotor.Direction.REVERSE);
+        leftFrontMotor  = hardwareMap.get(DcMotor.class, "motor 2");
+        rightFrontMotor = hardwareMap.get(DcMotor.class, "motor 1");
+        leftFrontMotor.setDirection(DcMotor.Direction.FORWARD);
+        rightFrontMotor.setDirection(DcMotor.Direction.REVERSE);
+        cameraLRServo = hardwareMap.get(Servo.class, "camera lr");
+        cameraUDServo = hardwareMap.get(Servo.class, "camera ud");
         initCamera();
 
         waitForStart();
@@ -47,11 +53,30 @@ public class TwoWheelCameraDrive extends LinearOpMode {
             double rightFrontPower;
             leftFrontPower   = 0.3 * gamepad1.left_stick_y;
             rightFrontPower  = 0.3 * gamepad1.right_stick_y;
-            leftFront.setPower(leftFrontPower);
-            rightFront.setPower(rightFrontPower);
+            leftFrontMotor.setPower(leftFrontPower);
+            rightFrontMotor.setPower(rightFrontPower);
 
-            telemetry.addData("Left Stick Y", gamepad1.left_stick_y);
-            telemetry.addData("Right Stick Y", gamepad1.right_stick_y);
+            if(gamepad1.x) {
+                cameraLRPos += 0.0002;
+            }
+            if(gamepad1.y) {
+                cameraLRPos -= 0.0002;
+            }
+            if(gamepad1.a) {
+                cameraUDPos += 0.0002;
+            }
+            if(gamepad1.b) {
+                cameraUDPos -= 0.0002;
+            }
+            cameraLRPos = Range.clip(cameraLRPos, 0, 1);
+            cameraUDPos = Range.clip(cameraUDPos, 0, 1);
+            cameraLRServo.setPosition(cameraLRPos);
+            cameraUDServo.setPosition(cameraUDPos);
+
+            telemetry.addData("Left Front Power", leftFrontPower);
+            telemetry.addData("Right Front Power", rightFrontPower);
+            telemetry.addData("Camera LR Pos", cameraLRPos);
+            telemetry.addData("Camera UD Pos", cameraUDPos);
             telemetry.update();
         }
     }
