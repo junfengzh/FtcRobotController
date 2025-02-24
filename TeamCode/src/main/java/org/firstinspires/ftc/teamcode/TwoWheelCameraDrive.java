@@ -51,8 +51,13 @@ public class TwoWheelCameraDrive extends LinearOpMode {
         while (opModeIsActive()) {
             double leftFrontPower;
             double rightFrontPower;
-            leftFrontPower   = 0.3 * gamepad1.left_stick_y;
-            rightFrontPower  = 0.3 * gamepad1.right_stick_y;
+            if (gamepad1.left_bumper) {
+                leftFrontPower   = 0.7 * gamepad1.left_stick_y;
+                rightFrontPower  = 0.7 * gamepad1.right_stick_y;
+            } else {
+                leftFrontPower   = 0.3 * gamepad1.left_stick_y;
+                rightFrontPower  = 0.3 * gamepad1.right_stick_y;
+            }
             leftFrontMotor.setPower(leftFrontPower);
             rightFrontMotor.setPower(rightFrontPower);
 
