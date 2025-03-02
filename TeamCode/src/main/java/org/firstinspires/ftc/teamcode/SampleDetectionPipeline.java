@@ -14,10 +14,14 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
 
     // Perspective transformation source and destination points
     private final MatOfPoint2f imagePoints = new MatOfPoint2f(
-            new Point(178, 35),    // Top-left
-            new Point(400, 15),    // Top-right
-            new Point(573, 99),    // Bottom-right
-            new Point(139, 160)    // Bottom-left
+            new Point(164, 44),    // Top-left
+            new Point(384, 42),    // Top-right
+            new Point(462, 158),    // Bottom-right
+            new Point(14, 156)    // Bottom-left
+            // new Point(178, 35),    // Top-left
+            // new Point(400, 15),    // Top-right
+            // new Point(573, 99),    // Bottom-right
+            // new Point(139, 160)    // Bottom-left
     );
     private final MatOfPoint2f objectPoints = new MatOfPoint2f(
             new Point(0, 0),       // New top-left
