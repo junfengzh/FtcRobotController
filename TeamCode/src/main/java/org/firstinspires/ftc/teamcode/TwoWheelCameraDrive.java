@@ -30,8 +30,8 @@ public class TwoWheelCameraDrive extends LinearOpMode {
     private Servo cameraUDServo = null;
     private VisionPortal visionPortal;
     private AprilTagProcessor aprilTag;
-    private double cameraLRPos = 0.5;
-    private double cameraUDPos = 0.5;
+    private double cameraLRPos = 0.595;
+    private double cameraUDPos = 0.654;
 
     @Override
     public void runOpMode() {

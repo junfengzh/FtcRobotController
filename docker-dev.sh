@@ -2,7 +2,7 @@
 docker run -it -v .:/home/mobiledevops/app mobiledevops/android-sdk-image bash
 
 # inside the dev container
-# - ./gradlew clean assemblyRelease
+# - ./gradlew clean assembleRelease
 # - adb connect <host:port>
 # - adb install -r TeamCode/build/outputs/apk/release/TeamCode-release.apk
 
@@ -14,7 +14,7 @@ docker run -it -v .:/home/mobiledevops/app mobiledevops/android-sdk-image bash
 #
 # rewrite web socket url
 # location /dash {
-#   proxy_pass http://10.0.0.169:8043;
+#   proxy_pass http://10.0.0.169:8080;
 #   proxy_set_header Accept-Encoding "";
 #   sub_filter_types application/javascript text/javascript;
 #   sub_filter 'ws://' 'wss://';
