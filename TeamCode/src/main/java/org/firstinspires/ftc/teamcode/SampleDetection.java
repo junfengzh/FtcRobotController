@@ -24,7 +24,7 @@ public class SampleDetection extends LinearOpMode {
                 "cameraMonitorViewId", "id", hardwareMap.appContext.getPackageName());
         webcam = OpenCvCameraFactory.getInstance().createWebcam(hardwareMap.get(WebcamName.class, "Webcam 2"), cameraMonitorViewId);
         
-        pipeline = new SampleDetectionPipeline(telemetry);
+        pipeline = new SampleDetectionPipeline(hardwareMap.appContext, telemetry);
         webcam.setPipeline(pipeline);
 
         webcam.openCameraDeviceAsync(new OpenCvCamera.AsyncCameraOpenListener() {
