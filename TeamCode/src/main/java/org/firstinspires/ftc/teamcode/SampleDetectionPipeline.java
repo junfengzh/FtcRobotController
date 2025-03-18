@@ -51,13 +51,15 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     private final int cameraY = 487;
     private final int cameraZ = 115;
 
-    // (Optional) Telemetry if you want to output values to the driver station
+    private boolean detectBlue = true;
     private Telemetry telemetry;
-
     private YoloV8TFLiteDetector detector;
 
-    public SampleDetectionPipeline(Context context, Telemetry telemetry) {
+    private List<RotatedRect> detections = new ArrayList<>();
+
+    public SampleDetectionPipeline(Context context, Telemetry telemetry, boolean detectBlue) {
         this.telemetry = telemetry;
+        this.detectBlue = detectBlue;
         detector = new YoloV8TFLiteDetector(context);
         
         // Initialize camera calibration matrices
@@ -76,37 +78,16 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         sampleDepth = mmToPixel(38);
     }
 
+    public List<RotatedRect> getDetections() {
+        return this.detections;
+    }
+
     // Conversion functions between mm and pixel (based on warped image width)
     private int mmToPixel(double mm) {
         return (int) (mm * warpedImageSize.width / warpedWidthMM);
     }
     private int pixelToMM(double pixel) {
         return (int) (pixel * warpedWidthMM / warpedImageSize.width);
-    }
-
-    // Helper: Euclidean distance between two points.
-    private double distance(Point a, Point b) {
-        return Math.hypot(a.x - b.x, a.y - b.y);
-    }
-
-    // Helper: Compute the angle (in degrees) between the vectors BA and BC.
-    private double angleBetween(Point a, Point b, Point c) {
-        double[] ba = {a.x - b.x, a.y - b.y};
-        double[] bc = {c.x - b.x, c.y - b.y};
-        double dot = ba[0] * bc[0] + ba[1] * bc[1];
-        double normBA = Math.hypot(ba[0], ba[1]);
-        double normBC = Math.hypot(bc[0], bc[1]);
-        double cosineAngle = dot / (normBA * normBC);
-        cosineAngle = Math.max(-1, Math.min(1, cosineAngle)); // clip to [-1,1]
-        return Math.toDegrees(Math.acos(cosineAngle));
-    }
-
-    // Helper: Find point on the line from A to B at a given distance from A.
-    private Point pointOnLine(Point A, Point B, double dist) {
-        double dx = B.x - A.x;
-        double dy = B.y - A.y;
-        double len = Math.hypot(dx, dy);
-        return new Point(A.x + (dist * dx / len), A.y + (dist * dy / len));
     }
 
     // Helper: Approximates the bottom vertex given a top vertex based on camera geometry.
@@ -141,24 +122,30 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         // Color segmentation: convert to HSV and threshold for red hues.
         Mat hsv = new Mat();
         Imgproc.cvtColor(warped, hsv, Imgproc.COLOR_BGR2HSV);
-        Scalar lowerRed1 = new Scalar(0, 30, 100);
-        Scalar upperRed1 = new Scalar(10, 255, 255);
-        Scalar lowerRed2 = new Scalar(160, 30, 100);
-        Scalar upperRed2 = new Scalar(180, 255, 255);
-        Mat mask1 = new Mat();
-        Mat mask2 = new Mat();
-        Core.inRange(hsv, lowerRed1, upperRed1, mask1);
-        Core.inRange(hsv, lowerRed2, upperRed2, mask2);
         Mat mask = new Mat();
-        Core.add(mask1, mask2, mask);
+        if (detectBlue) {
+            Scalar lowerBlue = new Scalar(100, 120, 100);
+            Scalar upperBlue = new Scalar(140, 255, 255);
+            Core.inRange(hsv, lowerBlue, upperBlue, mask);
+        } else {
+            Scalar lowerRed1 = new Scalar(0, 30, 100);
+            Scalar upperRed1 = new Scalar(10, 255, 255);
+            Scalar lowerRed2 = new Scalar(160, 30, 100);
+            Scalar upperRed2 = new Scalar(180, 255, 255);
+            Mat mask1 = new Mat();
+            Mat mask2 = new Mat();
+            Core.inRange(hsv, lowerRed1, upperRed1, mask1);
+            Core.inRange(hsv, lowerRed2, upperRed2, mask2);
+            Core.add(mask1, mask2, mask);
+        }
 
         // Erode then dilate to reduce noise.
         Imgproc.erode(mask, mask, new Mat(), new Point(-1, -1), 2);
-        Imgproc.dilate(mask, mask, new Mat(), new Point(-1, -1), 2);
+        Imgproc.dilate(mask, mask, new Mat(), new Point(-1, -1), 3);
 
         // Create segmented image based on mask.
-        Mat segmented = new Mat();
-        Core.bitwise_and(warped, warped, segmented, mask);
+        // Mat segmented = new Mat();
+        // Core.bitwise_and(warped, warped, segmented, mask);
 
         // Convert the Mat to input tensor.
         float[][][][] inputTensor =
@@ -178,8 +165,9 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         int numGridCells = output[0][0].length;
 
         // Post-process the output tensor to extract oriented bounding boxes.
-        Mat detected = warped.clone();
+        Mat detected = warped; // .clone();
         List<List<Point>> topRectangles = new ArrayList<>();
+        List<RotatedRect> detections = new ArrayList<>();
 
         for (int i = 0; i < numGridCells; i++) {
             float cy = output[0][0][i];  // Center Y
@@ -196,6 +184,8 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
             h = h * modelImageHeight;
             angle = (float) -Math.toDegrees(angle);
 
+            if (w < 1 || h < 1) continue; // Skip zero size to avoid crash
+
             float confidence = Math.max(c1, Math.max(c2, c3));
             if (confidence < 0.4) continue; // Skip low-confidence detections
 
@@ -207,8 +197,30 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
             // Obtain the four vertices of the rotated rectangle.
             Point[] vertices = new Point[4];
             rRect.points(vertices);
+
+            // Filter out detections whose filled mask ratio is below threshold
+            if (maskedRatio(new MatOfPoint(vertices), mask) < 0.8)
+                continue;
+            
+            // Filter out detections by width/height ratio
+            double ratio = whRatio(w, h);
+            if (!(ratio > 2.0 && ratio < 2.6))
+                continue;
+
             topRectangles.add(Arrays.asList(vertices[0], vertices[1], vertices[2], vertices[3]));
+
+            // Calculate bottom center
+            Point bottomCenter = sampleTopVertexToBottom(center);
+            Point bottomCenterReal = new Point(
+                pixelToMM(bottomCenter.x - cameraX),
+                pixelToMM(bottomCenter.y - cameraY));
+            RotatedRect bottomRect = new RotatedRect(bottomCenterReal, rectSize, angle);
+            detections.add(bottomRect);
+            telemetry.addData("Detected", "%d %d %d",
+                bottomCenterReal.x, bottomCenterReal.y, (int) angle);
         }
+
+        this.detections = detections;
 
         // Calculate sample bottom rectangles.
         for (List<Point> topRect : topRectangles) {
@@ -224,11 +236,38 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         }
 
         // Send telemetry data for debugging.
-        telemetry.addData("Top Rectangles", topRectangles.size());
+        telemetry.addData("Detections", topRectangles.size());
         telemetry.update();
 
         // Return the final annotated image.
         return detected;
+    }
+
+    private static double maskedRatio(MatOfPoint box, Mat mask) {
+        // Create a blank mask with the same size and type as 'mask'
+        Mat boxMask = Mat.zeros(mask.size(), mask.type());
+        
+        // Fill the polygon defined by 'box' with white (255)
+        List<MatOfPoint> pts = new ArrayList<>();
+        pts.add(box);
+        Imgproc.fillPoly(boxMask, pts, new Scalar(255));
+        
+        // Compute the intersection between the provided mask and the box mask
+        Mat intersection = new Mat();
+        Core.bitwise_and(mask, boxMask, intersection);
+        
+        int boxArea = Core.countNonZero(boxMask);
+        int intersectionArea = Core.countNonZero(intersection);
+        
+        return (double) intersectionArea / boxArea;
+    }
+
+    private static double whRatio(double w, double h) {
+        double ratio = w / h;
+        if (ratio < 1.0) {
+            ratio = 1.0 / ratio;
+        }
+        return ratio;
     }
 
     public class YoloV8TFLiteDetector {
@@ -237,7 +276,7 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         // Constructor: load the model from the assets folder.
         public YoloV8TFLiteDetector(Context context) {
             try {
-                tflite = new Interpreter(loadModelFile(context, "yolov8_obb.tflite"));
+                tflite = new Interpreter(loadModelFile(context, "yolov8_obb_v2.tflite"));
             } catch (IOException e) {
                 throw new RuntimeException("Failed to load TFLite model", e);
             }
