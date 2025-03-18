@@ -24,11 +24,18 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
 
     // Perspective transformation source and destination points
     private final MatOfPoint2f imagePoints = new MatOfPoint2f(
-            new Point(168, 43),    // Top-left
-            new Point(391, 44),    // Top-right
-            new Point(473, 158),    // Bottom-right
-            new Point(3, 163)    // Bottom-left
-    );
+            // Tiles on desk
+            new Point(202, 43),    // Top-left
+            new Point(451, 47),    // Top-right
+            new Point(631, 216),    // Bottom-right
+            new Point(71, 221)    // Bottom-left
+
+            // Actual field
+            // new Point(168, 43),    // Top-left
+            // new Point(391, 44),    // Top-right
+            // new Point(473, 158),    // Bottom-right
+            // new Point(3, 163)    // Bottom-left
+            );
     private final MatOfPoint2f objectPoints = new MatOfPoint2f(
             new Point(0, 0),       // New top-left
             new Point(300, 0),     // New top-right
@@ -41,15 +48,25 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     private final Mat distCoeffs;
     
     // Real world measurements (in mm) converted to pixel scale
+    // Tiles on desk
     private final int warpedWidthMM = 630;
+    // Actual field
+    // private final int warpedWidthMM = 700;
+
     private final int sampleWidth;   // mm_to_pixel(38)
     private final int sampleHeight;  // mm_to_pixel(88)
     private final int sampleDepth;   // mm_to_pixel(38)
 
     // Camera 3D position
-    private final int cameraX = 202;
-    private final int cameraY = 487;
-    private final int cameraZ = 115;
+    // Tiles on desk
+    private final int cameraX = 122;
+    private final int cameraY = 432;
+    private final int cameraZ = 129;
+
+    // Actual field
+    // private final int cameraX = 202;
+    // private final int cameraY = 487;
+    // private final int cameraZ = 115;
 
     private boolean detectBlue = true;
     private Telemetry telemetry;
@@ -121,7 +138,7 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
 
         // Color segmentation: convert to HSV and threshold for red hues.
         Mat hsv = new Mat();
-        Imgproc.cvtColor(warped, hsv, Imgproc.COLOR_BGR2HSV);
+        Imgproc.cvtColor(warped, hsv, Imgproc.COLOR_RGB2HSV);
         Mat mask = new Mat();
         if (detectBlue) {
             Scalar lowerBlue = new Scalar(100, 120, 100);
@@ -144,19 +161,19 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         Imgproc.dilate(mask, mask, new Mat(), new Point(-1, -1), 3);
 
         // Create segmented image based on mask.
-        // Mat segmented = new Mat();
-        // Core.bitwise_and(warped, warped, segmented, mask);
+        Mat segmented = new Mat();
+        Core.bitwise_and(warped, warped, segmented, mask);
 
         // Convert the Mat to input tensor.
         float[][][][] inputTensor =
             new float[1][modelImageWidth][modelImageHeight][3];
         for (int i = 0; i < warpedImageSize.width; i++) {
             for (int j = 0; j < warpedImageSize.height; j++) {
-                double[] pixel = warped.get(j, i); // returns [B, G, R]
+                double[] pixel = warped.get(j, i); // returns [R, G, B]
                 // Normalize pixel values to [0, 1]
-                inputTensor[0][i][j][0] = (float) (pixel[2] / 255.0);
+                inputTensor[0][i][j][0] = (float) (pixel[0] / 255.0);
                 inputTensor[0][i][j][1] = (float) (pixel[1] / 255.0);
-                inputTensor[0][i][j][2] = (float) (pixel[0] / 255.0);
+                inputTensor[0][i][j][2] = (float) (pixel[2] / 255.0);
             }
         }
 
@@ -165,7 +182,6 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         int numGridCells = output[0][0].length;
 
         // Post-process the output tensor to extract oriented bounding boxes.
-        Mat detected = warped; // .clone();
         List<List<Point>> topRectangles = new ArrayList<>();
         List<RotatedRect> detections = new ArrayList<>();
 
@@ -184,10 +200,13 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
             h = h * modelImageHeight;
             angle = (float) -Math.toDegrees(angle);
 
+            // telemetry.addData("Raw", "%f %f %f %f %f %f %f %f",
+            //     cx, cy, w, h, angle, c1, c2, c3);
+
             if (w < 1 || h < 1) continue; // Skip zero size to avoid crash
 
             float confidence = Math.max(c1, Math.max(c2, c3));
-            if (confidence < 0.4) continue; // Skip low-confidence detections
+            if (confidence < 0.2) continue; // Skip low-confidence detections
 
             // Create a rotated rectangle using the detection outputs.
             Point center = new Point(cx, cy);
@@ -198,13 +217,17 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
             Point[] vertices = new Point[4];
             rRect.points(vertices);
 
+            double ratio1 = maskedRatio(new MatOfPoint(vertices), mask);
+            double ratio2 = whRatio(w, h);
+            // telemetry.addData("High Conf", "%f %f %f %f %f %f %f %f",
+            //     cx, cy, w, h, angle, confidence, ratio1, ratio2);
+
             // Filter out detections whose filled mask ratio is below threshold
-            if (maskedRatio(new MatOfPoint(vertices), mask) < 0.8)
+            if (ratio1 < 0.8)
                 continue;
             
             // Filter out detections by width/height ratio
-            double ratio = whRatio(w, h);
-            if (!(ratio > 2.0 && ratio < 2.6))
+            if (!(ratio2 > 2.0 && ratio2 < 2.6))
                 continue;
 
             topRectangles.add(Arrays.asList(vertices[0], vertices[1], vertices[2], vertices[3]));
@@ -216,8 +239,9 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                 pixelToMM(bottomCenter.y - cameraY));
             RotatedRect bottomRect = new RotatedRect(bottomCenterReal, rectSize, angle);
             detections.add(bottomRect);
-            telemetry.addData("Detected", "%d %d %d",
-                bottomCenterReal.x, bottomCenterReal.y, (int) angle);
+            telemetry.addData("Detected", "%d %d %d %d",
+                (int) bottomCenterReal.x, (int) bottomCenterReal.y,
+                (int) angle, (int) (confidence * 100));
         }
 
         this.detections = detections;
@@ -226,13 +250,13 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         for (List<Point> topRect : topRectangles) {
             MatOfPoint topPts = new MatOfPoint();
             topPts.fromList(topRect);
-            Imgproc.polylines(detected, Collections.singletonList(topPts), true, new Scalar(0, 255, 0), 2);
+            Imgproc.polylines(warped, Collections.singletonList(topPts), true, new Scalar(0, 255, 0), 2);
             List<Point> bottomRect = new ArrayList<>();
             for (Point p : topRect)
                 bottomRect.add(sampleTopVertexToBottom(p));
             MatOfPoint bottomPts = new MatOfPoint();
             bottomPts.fromList(bottomRect);
-            Imgproc.polylines(detected, Collections.singletonList(bottomPts), true, new Scalar(255, 255, 0), 2);
+            Imgproc.polylines(warped, Collections.singletonList(bottomPts), true, new Scalar(255, 255, 0), 2);
         }
 
         // Send telemetry data for debugging.
@@ -240,7 +264,7 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         telemetry.update();
 
         // Return the final annotated image.
-        return detected;
+        return warped;
     }
 
     private static double maskedRatio(MatOfPoint box, Mat mask) {
