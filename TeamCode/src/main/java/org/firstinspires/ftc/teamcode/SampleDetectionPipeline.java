@@ -141,12 +141,12 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         Imgproc.cvtColor(warped, hsv, Imgproc.COLOR_RGB2HSV);
         Mat mask = new Mat();
         if (detectBlue) {
-            Scalar lowerBlue = new Scalar(100, 120, 100);
+            Scalar lowerBlue = new Scalar(80, 100, 10);
             Scalar upperBlue = new Scalar(140, 255, 255);
             Core.inRange(hsv, lowerBlue, upperBlue, mask);
         } else {
             Scalar lowerRed1 = new Scalar(0, 30, 100);
-            Scalar upperRed1 = new Scalar(10, 255, 255);
+            Scalar upperRed1 = new Scalar(15, 255, 255);
             Scalar lowerRed2 = new Scalar(160, 30, 100);
             Scalar upperRed2 = new Scalar(180, 255, 255);
             Mat mask1 = new Mat();
@@ -185,6 +185,10 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         List<List<Point>> topRectangles = new ArrayList<>();
         List<RotatedRect> detections = new ArrayList<>();
 
+        // Used to dedupe overlapped detections
+        List<Point> centers = new ArrayList<>();
+        List<Float> confs = new ArrayList<>();
+
         for (int i = 0; i < numGridCells; i++) {
             float cy = output[0][0][i];  // Center Y
             float cx = output[0][1][i];  // Center X
@@ -217,6 +221,26 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
             Point[] vertices = new Point[4];
             rRect.points(vertices);
 
+            // Dedupe detections
+            boolean isNew = true;
+            for (int j = 0; j < centers.size(); j++) {
+                double dist = distance(cx, cy, centers.get(j).x, centers.get(j).y);
+                if (dist > sampleWidth / 2) {
+                    continue;
+                }
+                isNew = false;
+                if (confidence > confs.get(j)) {
+                    centers.set(j, center);
+                    confs.set(j, confidence);
+                }
+                break;
+            }
+            if (!isNew) {
+                continue;
+            }
+            centers.add(center);
+            confs.add(confidence);
+
             double ratio1 = maskedRatio(new MatOfPoint(vertices), mask);
             double ratio2 = whRatio(w, h);
             // telemetry.addData("High Conf", "%f %f %f %f %f %f %f %f",
@@ -244,6 +268,8 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                 (int) angle, (int) (confidence * 100));
         }
 
+        detections.sort(Comparator.comparingDouble(
+            detection -> -confs.get(detections.indexOf(detection))));
         this.detections = detections;
 
         // Calculate sample bottom rectangles.
@@ -294,13 +320,17 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         return ratio;
     }
 
+    private static double distance(double x1, double y1, double x2, double y2) {
+        return Math.sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
+    }
+
     public class YoloV8TFLiteDetector {
         private Interpreter tflite;
     
         // Constructor: load the model from the assets folder.
         public YoloV8TFLiteDetector(Context context) {
             try {
-                tflite = new Interpreter(loadModelFile(context, "yolov8_obb_v2.tflite"));
+                tflite = new Interpreter(loadModelFile(context, "yolov8_obb_v3.tflite"));
             } catch (IOException e) {
                 throw new RuntimeException("Failed to load TFLite model", e);
             }

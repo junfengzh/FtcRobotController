@@ -1,4 +1,7 @@
+set -e
+
 # start docker dev container
+# docker system prune -f
 docker run -it -v .:/home/mobiledevops/app mobiledevops/android-sdk-image bash
 
 # inside the dev container
